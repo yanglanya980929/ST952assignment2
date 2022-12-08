@@ -6,6 +6,7 @@
 #Importing Libraries
 ##########################################################
 
+
 source("funcs.R")
 
 activate.packages.if.missing("janitor")
@@ -317,8 +318,7 @@ TeleChurn_test_notrans <- TeleChurn_fit_notrans[-index_sub,]
 
 # Initial models
 # First fit - all variables with transformation
-detach(TeleChurn_trans)
-attach(TeleChurn_trans)
+detach(TeleChurn_pre)
 
 ##########################################################
 # Analysis of Deviance - Manual variable removal
@@ -397,12 +397,12 @@ plot(fit_all_notrans_train)
 
 # Replot residuals (double curve is known issue without binning)
 fit_all.res <- resid(reg.step1)
-fit_all.yhat <- predict(reg.step1)
+fit_all.yhat <- predict(reg.step1, type="response")
 binnedplot(fit_all.yhat, fit_all.res, nclass=20)
 
 fit_all_train.res <- resid(reg.step1.train)
 fit_all_train.yhat <- predict(reg.step1.train, type="response")
-binnedplot(fit_all_train.yhat, fit_all_train.res, nclass=40)
+binnedplot(fit_all_train.yhat, fit_all_train.res, nclass=20)
 
 # Additional diagnostics (QUESTION 6)
 #avPlots(reg.step1)
@@ -589,12 +589,13 @@ Anova(fit_exhaustive_BIC$BestModel)
 activate.packages.if.missing("Matrix")
 activate.packages.if.missing("foreach")
 
-#Put all explorary variables into a matrix
 elastic.net.cv.results <- return_min_cvm_lambda(
   TeleChurn_train,
-  "Churn")
+  "Churn") # Note we recurse 5 times. This can be changed with depth parameter.
 
-elastic.net.best <- elastic.net.cv.results$best.models[[2]]
+best.cvm <- min(elastic.net.cv.results$results$CVM)
+best.index <- which(elastic.net.cv.results$results$CVM == best.cvm)
+elastic.net.best <- elastic.net.cv.results$best.models[[best.index]]
 best.lambda <- elastic.net.best$lambda.min
 best.alpha <- elastic.net.cv.results$results[13,]$Alpha
 
@@ -609,8 +610,6 @@ abline(v = log(lambda.1se.min), col="red")
 TeleChurn_X <- model.matrix(Churn ~ ., TeleChurn_train)[,-1]
 TeleChurn_X_test <- model.matrix(Churn ~ ., TeleChurn_test)[,-1]
 
-# deviance when we select lambda min and 1se as 
-# parameter to compute coefficients 
 fit_lambda_min <- glmnet(TeleChurn_X,
                          TeleChurn_train$Churn,
                          alpha=best.alpha,
@@ -704,6 +703,7 @@ new.obs <- data.frame(
   logSqSecondsOfUse = log(SecondsOfUse + 0.1)^2,
   recipFrequencyOfUse = 1 / (FrequencyOfUse + 1),
   sqFrequencyOfSMS = FrequencyOfSMS^2,
+  IDistinctCalledNumbers = factor(DistinctCalledNumbers > 0, levels=c(FALSE, TRUE)),
   recipDistinctCalledNumbers = 1 / (DistinctCalledNumbers + 1),
   recipSqDistinctCalledNumbers = 1 / (DistinctCalledNumbers + 1)^2)
 
@@ -718,13 +718,13 @@ new.churn.prob <- predict(best.overall.model,
 
 new.churn.prob
 
+# Manual calculation of log odds for new customer
 ageGroup.contrasts <- contrasts(TeleChurn_train$AgeGroup)
 ageGroup.Three <- ageGroup.contrasts[3,]
 chargeAmount.contrasts <- contrasts(TeleChurn_train$ChargeAmount)
 chargeAmount.Zero <- chargeAmount.contrasts[1,]
 best.coefs <- coef(best.overall.model)
 
-# Manual calculation of log odds for new customer
 log.odds <- 
   best.coefs[1] +
   best.coefs[2] * 6 +
